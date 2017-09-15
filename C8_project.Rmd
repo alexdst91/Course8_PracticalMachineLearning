@@ -1,0 +1,155 @@
+---
+title: "Course8_project"
+output: html_document
+author: Alessandro Destefanis
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(randomForest)
+library(rpart) 
+library(dplyr)
+```
+
+## Executive summary
+
+Scope of the project is applying predicting models in order to come up with a reasonably good prediction regarding the class of a physical exercise given data collected by smart sensors.
+Here we download the data and create training and testing data.frame in R:
+
+## Getting data
+
+```{r download, cache=TRUE}
+#if not present, create data folder
+if(!file.exists("./data")){dir.create("./data")}
+
+#if not present, download csv file
+URLTraining<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if(!file.exists("./data/plm-training.csv")){
+    download.file(URLTraining, "./data/plm-training.csv", method = "curl")
+}
+
+#if not present, download csv file
+URLTesting<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists("./data/plm-testing.csv")){
+    download.file(URLTesting, "./data/plm-testing.csv", method = "curl")
+}
+
+training <- read.csv("./data/plm-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("./data/plm-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+## Cross validation training subsets
+
+Here we set the seed for the entire project and we split training data into two data sets, 70% for training1, 30% for training2test:
+
+```{r crossValidationSets}
+set.seed(12345)
+
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+training1 <- training[inTrain, ] 
+training2test <- training[-inTrain, ]
+```
+
+## Cleaning data
+
+Here we delete useless columns, that are columns mainly made by NAs...
+
+```{r NAcolumns}
+totRows <- nrow(training1)
+treshold <- 0.65
+tobeDeleted <-c()
+
+for(i in 1:dim(training1)[2]){
+    
+    totNAs<-sum(is.na(training1[, i] ) )
+    
+    if(totNAs/totRows>treshold){
+        tobeDeleted<-c(tobeDeleted,i)
+    }
+}
+training1 <- training1[,-tobeDeleted]
+
+```
+
+...and columns with very low variability, which utility is very low.
+
+```{r lowVarCol}
+NZV <- nearZeroVar(training1, saveMetrics=TRUE)
+NZVvars <- names(training1) %in% colnames(training1[NZV$nzv])
+
+training1<-training1[!NZVvars]
+
+```
+
+We also delete ID variable so that it does not interfer.
+
+```{r IDcol}
+training1<-training1[,-1]
+
+```
+
+Now we apply the same transformations to the other datasets:
+
+```{r uniformity}
+clean1 <- colnames(training1)
+clean2 <- colnames(training1[, -58])
+training2test <- training2test[clean1]
+testing <- testing[clean2]
+```
+
+Those operations give us 2 training datasets with `r dim(training1)[2]` columns and a testing dataset of `r dim(testing)[2]` columns. Here we make sure the classes of training and testing datasets columns are equal.
+
+```{r classEqual}
+
+for(i in 1:(dim(training1)[2]-1)){
+    
+    if(is.factor(training1[,i])){
+        testing[,i] <- as.factor(testing[,i])
+    }
+    else if(is.integer(training1[,i])){
+        testing[,i] <- as.integer(testing[,i])
+    }
+    else if(is.numeric(training1[,i]))
+        testing[,i] <- as.numeric(testing[,i])
+}
+```
+
+## Decision tree algorithm
+
+Here we apply decision tree algorithm:
+
+```{r modTree, cache=TRUE}
+mod_tree <- train(classe ~ ., data=training1, method="rpart")
+```
+
+and test the result on the test set (inside training set):
+
+```{r testTree}
+CVTree <- predict(mod_tree, training2test)
+confusionMatrix(CVTree, training2test$classe)
+```
+
+## Random forest algorithm
+
+Here we apply random forest algorithm:
+
+```{r modRF, cache=TRUE}
+mod_rf <- train(classe ~. , data=training1, method="rf",prox=TRUE)
+```
+
+and test the result on the test set (inside training set):
+
+```{r testRF}
+CVRF <- predict(mod_rf, training2test)
+confusionMatrix(CVRF, training2test$classe)
+```
+
+## Result
+
+Here we get the final result applying the best performing algorithm (random forest) to the testing dataset:
+
+```{r testFinal}
+predictions <- predict(mod_rf, testing)
+predictions
+```
